@@ -16,8 +16,12 @@ COPY . .
 # Gerar Prisma Client
 RUN npx prisma generate
 
+# Adicionar script para migração do banco
+COPY docker-entrypoint.sh /
+RUN chmod +x /docker-entrypoint.sh
+
 # Expor a porta
 EXPOSE 3000
 
 # Comando para iniciar
-CMD ["npm", "start"] 
+ENTRYPOINT ["/docker-entrypoint.sh"] 
