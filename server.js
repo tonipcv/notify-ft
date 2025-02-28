@@ -5,6 +5,7 @@ import apn from 'apn'; // Adicione esta dependência para APNs
 import { PrismaClient } from '@prisma/client';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,11 +28,23 @@ app.use((req, res, next) => {
 
 const DEBUG = true;
 
+// Verificar se o arquivo de chave APNs existe
+const keyPath = process.env.NODE_ENV === 'production' 
+  ? '/AuthKey_2B7PM6X757.p8'
+  : path.join(__dirname, 'AuthKey_2B7PM6X757.p8');
+
+if (!fs.existsSync(keyPath)) {
+  console.error(`❌ Arquivo de chave APNs não encontrado em: ${keyPath}`);
+  process.exit(1);
+}
+
+console.log(`✅ Arquivo de chave APNs encontrado em: ${keyPath}`);
+
 // Configuração do provedor APNs
 const apnProvider = new apn.Provider({
   token: {
     key: process.env.NODE_ENV === 'production' 
-      ? process.env.APNS_KEY_PATH 
+      ? '/AuthKey_2B7PM6X757.p8'
       : path.join(__dirname, 'AuthKey_2B7PM6X757.p8'),
     keyId: process.env.APNS_KEY_ID,
     teamId: process.env.APNS_TEAM_ID,

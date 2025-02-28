@@ -5,7 +5,7 @@ WORKDIR /app
 # Copiar arquivos de dependências
 COPY package*.json ./
 COPY prisma ./prisma/
-COPY AuthKey_2B7PM6X757.p8 ./
+COPY AuthKey_2B7PM6X757.p8 /AuthKey_2B7PM6X757.p8
 
 # Instalar dependências
 RUN npm install
