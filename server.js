@@ -30,11 +30,13 @@ const DEBUG = true;
 // Configuração do provedor APNs
 const apnProvider = new apn.Provider({
   token: {
-    key: path.join(__dirname, 'AuthKey_2B7PM6X757.p8'),
+    key: process.env.NODE_ENV === 'production' 
+      ? process.env.APNS_KEY_PATH 
+      : path.join(__dirname, 'AuthKey_2B7PM6X757.p8'),
     keyId: process.env.APNS_KEY_ID,
     teamId: process.env.APNS_TEAM_ID,
   },
-  production: process.env.NODE_ENV === 'production' // Baseado no ambiente
+  production: process.env.NODE_ENV === 'production'
 });
 
 // 1. Rota principal para teste
@@ -78,8 +80,10 @@ app.post('/register-device', async (req, res) => {
 app.post('/telegram-webhook', async (req, res) => {
   console.log('\n🤖 Telegram Webhook Acionado');
   console.log('Timestamp:', new Date().toISOString());
+  console.log('URL completa:', req.protocol + '://' + req.get('host') + req.originalUrl);
   console.log('Headers:', req.headers);
   console.log('Body completo:', req.body);
+  console.log('Query:', req.query);
   
   try {
     const update = req.body;
@@ -106,6 +110,14 @@ app.post('/telegram-webhook', async (req, res) => {
     console.error('Stack trace:', error.stack);
     return res.sendStatus(500);
   }
+});
+
+// Rota de teste para o webhook
+app.post('/test-webhook', (req, res) => {
+  console.log('Teste de webhook recebido:');
+  console.log('Headers:', req.headers);
+  console.log('Body:', req.body);
+  res.send('Teste de webhook recebido com sucesso');
 });
 
 // 4. Rota para configurar webhook do Telegram
@@ -180,8 +192,8 @@ async function sendApnsNotification(messageText, senderName) {
     notification.badge = 1;
     notification.sound = 'default';
     notification.alert = {
-      title: `Nova mensagem de ${senderName}`,
-      body: messageText
+      title: `Futuros Tech`,
+      body: `Novo sinal de entrada, caso seja Premium abra para ver!`
     };
     notification.topic = process.env.BUNDLE_ID;
     
