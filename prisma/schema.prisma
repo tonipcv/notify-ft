@@ -13,4 +13,4 @@ model DeviceToken {
   userId       String   @default("anônimo")
   platform     String   @default("ios")
   registeredAt DateTime @default(now())
-} 
+}

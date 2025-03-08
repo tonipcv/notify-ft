@@ -13,9 +13,9 @@
   "description": "",
   "dependencies": {
     "@prisma/client": "^6.4.1",
-    "apn": "^2.2.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "firebase-admin": "^11.11.0",
     "node-fetch": "^3.3.2"
   },
   "type": "module",

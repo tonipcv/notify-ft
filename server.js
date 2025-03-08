@@ -1,18 +1,21 @@
 import 'dotenv/config';
 import express from 'express';
 import fetch from 'node-fetch';
-import apn from 'apn'; // Adicione esta dependência para APNs
 import { PrismaClient } from '@prisma/client';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import fs from 'fs';
+import { messaging } from './firebase-config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const prisma = new PrismaClient();
 const app = express();
-app.use(express.json());
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 
 // Middleware de logging
 app.use((req, res, next) => {
@@ -28,28 +31,22 @@ app.use((req, res, next) => {
 
 const DEBUG = true;
 
-// Verificar se o arquivo de chave APNs existe
-const keyPath = process.env.NODE_ENV === 'production' 
-  ? '/AuthKey_2B7PM6X757.p8'
-  : path.join(__dirname, 'AuthKey_2B7PM6X757.p8');
-
-if (!fs.existsSync(keyPath)) {
-  console.error(`❌ Arquivo de chave APNs não encontrado em: ${keyPath}`);
+// Verificar variáveis de ambiente do Firebase
+if (!process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
+  console.error('❌ Variáveis de ambiente do Firebase não configuradas');
   process.exit(1);
 }
 
-console.log(`✅ Arquivo de chave APNs encontrado em: ${keyPath}`);
+console.log('✅ Configuração do Firebase carregada com sucesso');
 
-// Configuração do provedor APNs
-const apnProvider = new apn.Provider({
-  token: {
-    key: process.env.NODE_ENV === 'production' 
-      ? '/AuthKey_2B7PM6X757.p8'
-      : path.join(__dirname, 'AuthKey_2B7PM6X757.p8'),
-    keyId: process.env.APNS_KEY_ID,
-    teamId: process.env.APNS_TEAM_ID,
-  },
-  production: process.env.NODE_ENV === 'production'
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    env: process.env.NODE_ENV,
+    webhook_url: process.env.WEBHOOK_URL
+  });
 });
 
 // 1. Rota principal para teste
@@ -91,12 +88,17 @@ app.post('/register-device', async (req, res) => {
 
 // 3. Rota Webhook do Telegram
 app.post('/telegram-webhook', async (req, res) => {
-  console.log('\n🤖 Telegram Webhook Acionado');
+  // Enviar resposta imediatamente para o Telegram
+  res.sendStatus(200);
+  
+  console.log('\n�� Telegram Webhook Acionado');
   console.log('Timestamp:', new Date().toISOString());
   console.log('URL completa:', req.protocol + '://' + req.get('host') + req.originalUrl);
   console.log('Headers:', req.headers);
   console.log('Body completo:', req.body);
   console.log('Query:', req.query);
+  console.log('Method:', req.method);
+  console.log('IP:', req.ip);
   
   try {
     const update = req.body;
@@ -110,27 +112,19 @@ app.post('/telegram-webhook', async (req, res) => {
 
       console.log('🔔 Enviando notificação via APNs...');
       // Enviar para todos os dispositivos registrados
-      await sendApnsNotification(messageText, from.first_name);
+      await sendFcmNotification(messageText, from.first_name);
       console.log('✅ Notificação enviada com sucesso');
     } else {
       console.log('⚠️ Recebido update que não é mensagem de texto:', JSON.stringify(update, null, 2));
     }
 
-    console.log('✅ Webhook processado com sucesso');
-    return res.sendStatus(200);
+    // Log da resposta
+    console.log('✅ Enviando resposta 200 para o Telegram');
   } catch (error) {
     console.error('❌ Erro no processamento do webhook:', error);
     console.error('Stack trace:', error.stack);
-    return res.sendStatus(500);
+    console.error('Request body:', req.body);
   }
-});
-
-// Rota de teste para o webhook
-app.post('/test-webhook', (req, res) => {
-  console.log('Teste de webhook recebido:');
-  console.log('Headers:', req.headers);
-  console.log('Body:', req.body);
-  res.send('Teste de webhook recebido com sucesso');
 });
 
 // 4. Rota para configurar webhook do Telegram
@@ -183,94 +177,159 @@ app.get('/setup-webhook', async (req, res) => {
   }
 });
 
-// 5. Função para enviar notificação via APNs
-async function sendApnsNotification(messageText, senderName) {
+// 5. Função para enviar notificação via Firebase Cloud Messaging
+async function sendFcmNotification(messageText, senderName) {
   try {
     // Buscar tokens no banco de dados
-    const devices = await prisma.deviceToken.findMany({
-      where: {
-        platform: 'ios'
-      }
-    });
+    const devices = await prisma.deviceToken.findMany();
     
     if (devices.length === 0) {
-      console.log('Nenhum dispositivo iOS registrado');
+      console.log('Nenhum dispositivo registrado');
       return;
     }
 
-    const notification = new apn.Notification();
-    
-    // Configurar a notificação
-    notification.expiry = Math.floor(Date.now() / 1000) + 3600;
-    notification.badge = 1;
-    notification.sound = 'default';
-    notification.alert = {
-      title: `Futuros Tech`,
-      body: `Novo sinal de entrada, caso seja Premium abra para ver!`
-    };
-    notification.topic = process.env.BUNDLE_ID;
-    
-    notification.payload = {
-      sender: senderName,
-      messageType: 'telegram',
-      timestamp: new Date().toISOString()
+    console.log(`📱 Enviando notificação para ${devices.length} dispositivo(s)`);
+
+    const message = {
+      notification: {
+        title: 'Futuros Tech',
+        body: 'Novo sinal de entrada, caso seja Premium abra para ver!'
+      },
+      data: {
+        sender: senderName,
+        messageType: 'telegram',
+        timestamp: new Date().toISOString(),
+        message: messageText
+      },
+      apns: {
+        payload: {
+          aps: {
+            sound: 'default',
+            badge: 1
+          }
+        }
+      }
     };
 
-    // Extrair apenas os tokens
-    const iosTokens = devices.map(device => device.deviceToken);
-    
-    console.log(`Enviando notificação para ${iosTokens.length} dispositivos iOS`);
-    const result = await apnProvider.send(notification, iosTokens);
-    
-    console.log('Resultado do envio:', JSON.stringify(result, null, 2));
-    
-    // Verificar falhas
-    if (result.failed.length > 0) {
-      console.error('Falhas no envio:', result.failed);
-      
-      // Remover tokens inválidos do banco
-      for (const item of result.failed) {
-        if (item.response && (
-          item.response.reason === 'BadDeviceToken' || 
-          item.response.reason === 'Unregistered'
-        )) {
-          console.log(`Removendo token inválido: ${item.device}`);
+    for (const device of devices) {
+      try {
+        console.log(`🚀 Enviando para token: ${device.deviceToken}`);
+        const response = await messaging.send({
+          ...message,
+          token: device.deviceToken
+        });
+        
+        console.log(`✅ Notificação enviada com sucesso para ${device.deviceToken}. MessageID: ${response}`);
+      } catch (error) {
+        console.error(`❌ Erro ao enviar para ${device.deviceToken}:`, error);
+        
+        // Se o token for inválido, remover do banco
+        if (error.code === 'messaging/invalid-registration-token' || 
+            error.code === 'messaging/registration-token-not-registered') {
+          console.log(`🗑️ Removendo token inválido: ${device.deviceToken}`);
           await prisma.deviceToken.delete({
-            where: { deviceToken: item.device }
+            where: { deviceToken: device.deviceToken }
           });
         }
       }
     }
   } catch (error) {
-    console.error('Erro ao enviar notificação via APNs:', error);
+    console.error('❌ Erro ao enviar notificação:', error);
+    throw error;
   }
 }
 
 // 6. Iniciar servidor
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
-  console.log(`Ambiente: ${process.env.NODE_ENV || 'desenvolvimento'}`);
-});
-
-// 7. Limpar recursos ao encerrar
-process.on('SIGINT', async () => {
-  console.log('Encerrando servidor e conexões...');
-  await prisma.$disconnect();
-  apnProvider.shutdown();
-  process.exit();
-});
-
-// Rota para listar dispositivos registrados
-app.get('/devices', async (req, res) => {
+// Rota para testar envio de notificação
+app.post('/send-test-notification', async (req, res) => {
   try {
+    const { userId, title, body } = req.body;
+    
+    // Buscar tokens do dispositivo para o usuário
+    const deviceTokens = await prisma.deviceToken.findMany({
+      where: {
+        userId: userId
+      }
+    });
+
+    if (deviceTokens.length === 0) {
+      return res.status(404).json({ error: 'Nenhum dispositivo encontrado para este usuário' });
+    }
+
+    const message = {
+      notification: {
+        title: title || 'Futuros Tech',
+        body: body || 'Notificação de teste'
+      },
+      data: {
+        type: 'test',
+        timestamp: new Date().toISOString()
+      },
+      apns: {
+        payload: {
+          aps: {
+            sound: 'default',
+            badge: 1
+          }
+        }
+      }
+    };
+
+    // Enviar para cada dispositivo
+    for (const device of deviceTokens) {
+      try {
+        console.log(`🚀 Enviando notificação de teste para: ${device.deviceToken}`);
+        const response = await messaging.send({
+          ...message,
+          token: device.deviceToken
+        });
+        console.log(`✅ Notificação enviada com sucesso. MessageID: ${response}`);
+      } catch (error) {
+        console.error(`❌ Erro ao enviar para ${device.deviceToken}:`, error);
+        
+        if (error.code === 'messaging/invalid-registration-token' || 
+            error.code === 'messaging/registration-token-not-registered') {
+          console.log(`🗑️ Removendo token inválido: ${device.deviceToken}`);
+          await prisma.deviceToken.delete({
+            where: { deviceToken: device.deviceToken }
+          });
+        }
+      }
+    }
+
+    res.json({ success: true, message: 'Notificações enviadas com sucesso' });
+  } catch (error) {
+    console.error('Erro ao enviar notificações:', error);
+    res.status(500).json({ error: 'Erro ao enviar notificações' });
+  }
+});
+
+// Rota para testar conexão com banco
+app.get('/db-test', async (req, res) => {
+  try {
+    // Tenta contar os registros
+    const count = await prisma.deviceToken.count();
+    
+    // Tenta buscar todos os registros
     const devices = await prisma.deviceToken.findMany();
+    
     res.json({
-      count: devices.length,
-      devices: devices
+      success: true,
+      count,
+      connection: 'OK',
+      devices
     });
   } catch (error) {
-    console.error('Erro ao listar dispositivos:', error);
-    res.status(500).json({ error: 'Erro ao listar dispositivos' });
+    console.error('Erro ao testar banco:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      connection: 'FAILED'
+    });
   }
+});
+
+app.listen(PORT, () => {
+  console.log(`Servidor rodando na porta ${PORT}`);
 });
