@@ -110,7 +110,7 @@ app.post('/telegram-webhook', async (req, res) => {
       console.log(`📩 Mensagem: "${messageText}"`);
       console.log(`👤 De: ${from.first_name} (ID: ${from.id})`);
 
-      console.log('🔔 Enviando notificação via APNs...');
+      console.log('🔔 Enviando notificação via Firebase...');
       // Enviar para todos os dispositivos registrados
       await sendFcmNotification(messageText, from.first_name);
       console.log('✅ Notificação enviada com sucesso');
@@ -180,8 +180,16 @@ app.get('/setup-webhook', async (req, res) => {
 // 5. Função para enviar notificação via Firebase Cloud Messaging
 async function sendFcmNotification(messageText, senderName) {
   try {
-    // Buscar tokens no banco de dados
-    const devices = await prisma.deviceToken.findMany();
+    // Buscar tokens no banco de dados (excluindo tokens do Expo)
+    const devices = await prisma.deviceToken.findMany({
+      where: {
+        NOT: {
+          deviceToken: {
+            startsWith: 'ExpoMockPushToken'
+          }
+        }
+      }
+    });
     
     if (devices.length === 0) {
       console.log('Nenhum dispositivo registrado');
@@ -190,30 +198,51 @@ async function sendFcmNotification(messageText, senderName) {
 
     console.log(`📱 Enviando notificação para ${devices.length} dispositivo(s)`);
 
-    const message = {
-      notification: {
-        title: 'Futuros Tech',
-        body: 'Novo sinal de entrada, caso seja Premium abra para ver!'
-      },
-      data: {
-        sender: senderName,
-        messageType: 'telegram',
-        timestamp: new Date().toISOString(),
-        message: messageText
-      },
-      apns: {
-        payload: {
-          aps: {
-            sound: 'default',
-            badge: 1
-          }
-        }
-      }
-    };
-
     for (const device of devices) {
       try {
-        console.log(`🚀 Enviando para token: ${device.deviceToken}`);
+        const message = {
+          notification: {
+            title: 'Futuros Tech',
+            body: 'Novo sinal de entrada, caso seja Premium abra para ver!'
+          },
+          data: {
+            sender: senderName,
+            messageType: 'telegram',
+            timestamp: new Date().toISOString(),
+            message: messageText
+          }
+        };
+
+        // Adicionar configurações específicas para iOS
+        if (device.platform === 'ios') {
+          message.apns = {
+            payload: {
+              aps: {
+                sound: 'default',
+                badge: 1,
+                'mutable-content': 1
+              }
+            },
+            headers: {
+              'apns-priority': '10',
+              'apns-push-type': 'alert'
+            }
+          };
+        }
+
+        // Adicionar configurações específicas para Android
+        if (device.platform === 'android') {
+          message.android = {
+            priority: 'high',
+            notification: {
+              sound: 'default',
+              priority: 'high',
+              channelId: 'default'
+            }
+          };
+        }
+
+        console.log(`🚀 Enviando para token: ${device.deviceToken} (${device.platform})`);
         const response = await messaging.send({
           ...message,
           token: device.deviceToken
@@ -225,7 +254,8 @@ async function sendFcmNotification(messageText, senderName) {
         
         // Se o token for inválido, remover do banco
         if (error.code === 'messaging/invalid-registration-token' || 
-            error.code === 'messaging/registration-token-not-registered') {
+            error.code === 'messaging/registration-token-not-registered' ||
+            error.code === 'messaging/third-party-auth-error') {
           console.log(`🗑️ Removendo token inválido: ${device.deviceToken}`);
           await prisma.deviceToken.delete({
             where: { deviceToken: device.deviceToken }
