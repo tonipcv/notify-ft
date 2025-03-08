@@ -56,17 +56,25 @@ app.get('/', (req, res) => {
 
 // 2. Rota para registrar dispositivos
 app.post('/register-device', async (req, res) => {
+  console.log('\n=== INÍCIO DO REGISTRO DE DISPOSITIVO ===');
+  console.log('Headers recebidos:', req.headers);
+  console.log('Body completo:', JSON.stringify(req.body, null, 2));
+  
   const { deviceToken, userId, platform } = req.body;
   
   if (!deviceToken) {
+    console.log('❌ Erro: Device token não fornecido');
     return res.status(400).json({ error: 'Device token é obrigatório' });
   }
 
-  console.log(`📱 Registrando dispositivo: ${deviceToken} para usuário: ${userId || 'anônimo'}`);
+  console.log(`📱 Registrando dispositivo:
+    Token: ${deviceToken}
+    Usuário: ${userId || 'anônimo'}
+    Plataforma: ${platform || 'ios'}`);
   
   try {
     // Armazena o token no banco de dados
-    await prisma.deviceToken.upsert({
+    const result = await prisma.deviceToken.upsert({
       where: { deviceToken },
       update: {
         userId: userId || 'anônimo',
@@ -79,10 +87,18 @@ app.post('/register-device', async (req, res) => {
       }
     });
     
-    res.json({ success: true, message: 'Dispositivo registrado com sucesso' });
+    console.log('✅ Dispositivo registrado com sucesso:', result);
+    res.json({ success: true, message: 'Dispositivo registrado com sucesso', data: result });
   } catch (error) {
-    console.error('Erro ao registrar dispositivo:', error);
-    res.status(500).json({ error: 'Erro ao registrar dispositivo' });
+    console.error('❌ Erro ao registrar dispositivo:', error);
+    console.error('Stack trace:', error.stack);
+    res.status(500).json({ 
+      error: 'Erro ao registrar dispositivo',
+      details: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  } finally {
+    console.log('=== FIM DO REGISTRO DE DISPOSITIVO ===\n');
   }
 });
 
@@ -220,12 +236,11 @@ async function sendFcmNotification(messageText, senderName) {
               aps: {
                 sound: 'default',
                 badge: 1,
-                'mutable-content': 1
+                'content-available': 1
               }
             },
-            headers: {
-              'apns-priority': '10',
-              'apns-push-type': 'alert'
+            fcm_options: {
+              image: 'https://example.com/image.jpg'
             }
           };
         }
