@@ -10,7 +10,7 @@ datasource db {
 model DeviceToken {
   id           String   @id @default(uuid())
   deviceToken  String   @unique
-  userId       String   @default("anônimo")
+  userId       String
   platform     String   @default("ios")
   registeredAt DateTime @default(now())
 }

@@ -54,6 +54,11 @@ app.get('/', (req, res) => {
   res.send('Servidor rodando. Webhook em /telegram-webhook');
 });
 
+// Função para gerar ID aleatório
+function generateUserId() {
+  return 'user_' + Math.random().toString(36).substring(2, 15);
+}
+
 // 2. Rota para registrar dispositivos
 app.post('/register-device', async (req, res) => {
   console.log('\n=== INÍCIO DO REGISTRO DE DISPOSITIVO ===');
@@ -67,9 +72,12 @@ app.post('/register-device', async (req, res) => {
     return res.status(400).json({ error: 'Device token é obrigatório' });
   }
 
+  // Gerar um novo userId se não for fornecido
+  const generatedUserId = userId || generateUserId();
+
   console.log(`📱 Registrando dispositivo:
     Token: ${deviceToken}
-    Usuário: ${userId || 'anônimo'}
+    Usuário: ${generatedUserId} ${userId ? '(fornecido)' : '(gerado)'}
     Plataforma: ${platform || 'ios'}`);
   
   try {
@@ -77,18 +85,23 @@ app.post('/register-device', async (req, res) => {
     const result = await prisma.deviceToken.upsert({
       where: { deviceToken },
       update: {
-        userId: userId || 'anônimo',
+        userId: generatedUserId,
         platform: platform || 'ios',
       },
       create: {
         deviceToken,
-        userId: userId || 'anônimo',
+        userId: generatedUserId,
         platform: platform || 'ios',
       }
     });
     
     console.log('✅ Dispositivo registrado com sucesso:', result);
-    res.json({ success: true, message: 'Dispositivo registrado com sucesso', data: result });
+    res.json({ 
+      success: true, 
+      message: 'Dispositivo registrado com sucesso', 
+      data: result,
+      userId: generatedUserId
+    });
   } catch (error) {
     console.error('❌ Erro ao registrar dispositivo:', error);
     console.error('Stack trace:', error.stack);
